@@ -11,7 +11,8 @@ from enum import Enum
 from typing import Any, Literal
 import random
 
-Engine = Literal["alu", "load", "store", "flow"]
+ENGINE_NAMES = ["alu", "load", "store", "flow", "valu", "debug"]
+Engine = Literal["alu", "load", "store", "flow", "valu", "debug"]
 Instruction = dict[Engine, list[tuple]]
 
 
@@ -105,7 +106,8 @@ class Machine:
         value_trace: dict[Any, int] = {},
     ):
         self.cores = [
-            Core(id=i, scratch=[0] * scratch_size, trace_buf=[]) for i in range(n_cores)
+            Core(id=i, scratch=[0] * scratch_size, trace_buf=[])
+            for i in range(n_cores)
         ]
         self.mem = copy(mem_dump)
         self.program = program
@@ -145,7 +147,8 @@ class Machine:
 
     def rewrite_slot(self, slot):
         return tuple(
-            self.debug_info.scratch_map.get(s, (None, None))[0] or s for s in slot
+            self.debug_info.scratch_map.get(s, (None, None))[0] or s
+            for s in slot
         )
 
     def setup_trace(self):
@@ -259,7 +262,9 @@ class Machine:
             case ("multiply_add", dest, a, b, c):
                 for i in range(VLEN):
                     mul = (core.scratch[a + i] * core.scratch[b + i]) % (2**32)
-                    self.scratch_write[dest + i] = (mul + core.scratch[c + i]) % (2**32)
+                    self.scratch_write[dest + i] = (
+                        mul + core.scratch[c + i]
+                    ) % (2**32)
             case (op, dest, a1, a2):
                 for i in range(VLEN):
                     self.alu(core, op, dest + i, a1 + i, a2 + i)
@@ -301,7 +306,9 @@ class Machine:
         match slot:
             case ("select", dest, cond, a, b):
                 self.scratch_write[dest] = (
-                    core.scratch[a] if core.scratch[cond] != 0 else core.scratch[b]
+                    core.scratch[a]
+                    if core.scratch[cond] != 0
+                    else core.scratch[b]
                 )
             case ("add_imm", dest, a, imm):
                 self.scratch_write[dest] = (core.scratch[a] + imm) % (2**32)
@@ -371,14 +378,28 @@ class Machine:
                         loc, key = slot[1], slot[2]
                         ref = self.value_trace[key]
                         res = core.scratch[loc]
-                        assert res == ref, f"{res} != {ref} for {key} at pc={core.pc}"
+                        assert (
+                            res == ref
+                        ), f"{res} != {ref} for {key} at pc={core.pc}"
                     elif slot[0] == "vcompare":
                         loc, keys = slot[1], slot[2]
                         ref = [self.value_trace[key] for key in keys]
                         res = core.scratch[loc : loc + VLEN]
-                        assert res == ref, (
-                            f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
-                        )
+                        assert (
+                            res == ref
+                        ), f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
+                    elif slot[0] == "print_scratch_v":
+                        name, addr = slot[1], slot[2]
+                        print(f"scratch_v {name}: ", end="")
+                        for i in range(VLEN):
+                            print(f"{core.scratch[addr + i]}", end=" ")
+                        print()
+                    elif slot[0] == "print_scratch":
+                        name, addr = slot[1], slot[2]
+                        print(f"scratch_v {name}: ", end="")
+                        print(f"{core.scratch[addr]}")
+                    elif slot[0] == "print":
+                        print(*slot[1:])
                 continue
             assert len(slots) <= SLOT_LIMITS[name]
             for i, slot in enumerate(slots):
@@ -513,7 +534,9 @@ def build_mem_image(t: Tree, inp: Input) -> list[int]:
     return mem
 
 
-def myhash_traced(a: int, trace: dict[Any, int], round: int, batch_i: int) -> int:
+def myhash_traced(
+    a: int, trace: dict[Any, int], round: int, batch_i: int
+) -> int:
     """A simple 32-bit hash function"""
     fns = {
         "+": lambda x, y: x + y,
