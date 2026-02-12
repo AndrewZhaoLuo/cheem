@@ -105,10 +105,7 @@ class Machine:
         trace: bool = False,
         value_trace: dict[Any, int] = {},
     ):
-        self.cores = [
-            Core(id=i, scratch=[0] * scratch_size, trace_buf=[])
-            for i in range(n_cores)
-        ]
+        self.cores = [Core(id=i, scratch=[0] * scratch_size, trace_buf=[]) for i in range(n_cores)]
         self.mem = copy(mem_dump)
         self.program = program
         self.debug_info = debug_info
@@ -146,10 +143,7 @@ class Machine:
         return res
 
     def rewrite_slot(self, slot):
-        return tuple(
-            self.debug_info.scratch_map.get(s, (None, None))[0] or s
-            for s in slot
-        )
+        return tuple(self.debug_info.scratch_map.get(s, (None, None))[0] or s for s in slot)
 
     def setup_trace(self):
         """
@@ -262,9 +256,7 @@ class Machine:
             case ("multiply_add", dest, a, b, c):
                 for i in range(VLEN):
                     mul = (core.scratch[a + i] * core.scratch[b + i]) % (2**32)
-                    self.scratch_write[dest + i] = (
-                        mul + core.scratch[c + i]
-                    ) % (2**32)
+                    self.scratch_write[dest + i] = (mul + core.scratch[c + i]) % (2**32)
             case (op, dest, a1, a2):
                 for i in range(VLEN):
                     self.alu(core, op, dest + i, a1 + i, a2 + i)
@@ -278,9 +270,7 @@ class Machine:
                 self.scratch_write[dest] = self.mem[core.scratch[addr]]
             case ("load_offset", dest, addr, offset):
                 # Handy for treating vector dest and addr as a full block in the mini-compiler if you want
-                self.scratch_write[dest + offset] = self.mem[
-                    core.scratch[addr + offset]
-                ]
+                self.scratch_write[dest + offset] = self.mem[core.scratch[addr + offset]]
             case ("vload", dest, addr):  # addr is a scalar
                 addr = core.scratch[addr]
                 for vi in range(VLEN):
@@ -305,19 +295,13 @@ class Machine:
     def flow(self, core, *slot):
         match slot:
             case ("select", dest, cond, a, b):
-                self.scratch_write[dest] = (
-                    core.scratch[a]
-                    if core.scratch[cond] != 0
-                    else core.scratch[b]
-                )
+                self.scratch_write[dest] = core.scratch[a] if core.scratch[cond] != 0 else core.scratch[b]
             case ("add_imm", dest, a, imm):
                 self.scratch_write[dest] = (core.scratch[a] + imm) % (2**32)
             case ("vselect", dest, cond, a, b):
                 for vi in range(VLEN):
                     self.scratch_write[dest + vi] = (
-                        core.scratch[a + vi]
-                        if core.scratch[cond + vi] != 0
-                        else core.scratch[b + vi]
+                        core.scratch[a + vi] if core.scratch[cond + vi] != 0 else core.scratch[b + vi]
                     )
             case ("halt",):
                 core.state = CoreState.STOPPED
@@ -378,16 +362,12 @@ class Machine:
                         loc, key = slot[1], slot[2]
                         ref = self.value_trace[key]
                         res = core.scratch[loc]
-                        assert (
-                            res == ref
-                        ), f"{res} != {ref} for {key} at pc={core.pc}"
+                        assert res == ref, f"{res} != {ref} for {key} at pc={core.pc}"
                     elif slot[0] == "vcompare":
                         loc, keys = slot[1], slot[2]
                         ref = [self.value_trace[key] for key in keys]
                         res = core.scratch[loc : loc + VLEN]
-                        assert (
-                            res == ref
-                        ), f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
+                        assert res == ref, f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
                     elif slot[0] == "print_scratch_v":
                         name, addr = slot[1], slot[2]
                         print(f"scratch_v {name}: ", end="")
@@ -481,7 +461,6 @@ def myhash(a: int) -> int:
 
     for op1, val1, op2, op3, val3 in HASH_STAGES:
         a = r(fns[op2](r(fns[op1](a, val1)), r(fns[op3](a, val3))))
-
     return a
 
 
@@ -511,9 +490,7 @@ def build_mem_image(t: Tree, inp: Input) -> list[int]:
     """
     header = 7
     extra_room = len(t.values) + len(inp.indices) * 2 + VLEN * 2 + 32
-    mem = [0] * (
-        header + len(t.values) + len(inp.indices) + len(inp.values) + extra_room
-    )
+    mem = [0] * (header + len(t.values) + len(inp.indices) + len(inp.values) + extra_room)
     forest_values_p = header
     inp_indices_p = forest_values_p + len(t.values)
     inp_values_p = inp_indices_p + len(inp.values)
@@ -534,9 +511,7 @@ def build_mem_image(t: Tree, inp: Input) -> list[int]:
     return mem
 
 
-def myhash_traced(
-    a: int, trace: dict[Any, int], round: int, batch_i: int
-) -> int:
+def myhash_traced(a: int, trace: dict[Any, int], round: int, batch_i: int) -> int:
     """A simple 32-bit hash function"""
     fns = {
         "+": lambda x, y: x + y,
@@ -577,6 +552,7 @@ def reference_kernel2(mem: list[int], trace: dict[Any, int] = {}):
             trace[(h, i, "val")] = val
             node_val = mem[forest_values_p + idx]
             trace[(h, i, "node_val")] = node_val
+            # breakpoint()
             val = myhash_traced(val ^ node_val, trace, h, i)
             trace[(h, i, "hashed_val")] = val
             idx = 2 * idx + (1 if val % 2 == 0 else 2)
