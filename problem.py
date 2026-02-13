@@ -385,7 +385,7 @@ class Machine:
             for i, slot in enumerate(slots):
                 if self.trace is not None:
                     self.trace_slot(core, slot, name, i)
-                ENGINE_FNS[name](core, *slot)
+                    ENGINE_FNS[name](core, *slot)
         for addr, val in self.scratch_write.items():
             core.scratch[addr] = val
         for addr, val in self.mem_write.items():

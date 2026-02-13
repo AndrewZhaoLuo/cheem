@@ -36,6 +36,8 @@ from problem import (
     reference_kernel2,
 )
 
+from scheduler import Scheduler
+
 
 class KernelBuilder:
     def __init__(self):
@@ -50,8 +52,11 @@ class KernelBuilder:
     def debug_info(self):
         return DebugInfo(scratch_map=self.scratch_debug)
 
-    def build(self, slots: list[tuple[Engine, tuple]], vliw: bool = False):
+    def build(self, slots: list[tuple[Engine, tuple]], vliw: bool = True):
         # Simple slot packing that just uses one slot per instruction bundle
+        if vliw:
+            return Scheduler(self, slots).schedule()
+
         instrs = []
         for engine, slot in slots:
             instrs.append({engine: [slot]})
@@ -191,9 +196,16 @@ class KernelBuilder:
                 forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
                 body.append("valu", ("+", forest_addr_v, forest_values_p_v, indices_v))
                 forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
+
                 # Load data from nodes
                 for load_i in range(VLEN):
-                    body.append("load", ("load_offset", forest_v, forest_addr_v, load_i))
+                    body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
+                    body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
+
+                join_dst = ["join_dst", forest_v]
+                for load_i in range(VLEN):
+                    join_dst.append(forest_v + load_i)
+                body.append("hint", tuple(join_dst))
 
                 # forest_v --> the bintree values
                 # values_v --> the values in our array
@@ -337,7 +349,8 @@ class Tests(unittest.TestCase):
 
     def test_kernel_cycles(self):
         return
-        do_kernel_test(1, 1, 8)
+        # do_kernel_test(10, 16, 256)
+        do_kernel_test(1, 1, 8, trace=True, prints=False)
 
 
 # To run all the tests:
