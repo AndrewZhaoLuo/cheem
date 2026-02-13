@@ -76,35 +76,35 @@ class KernelBuilder:
         assert self.scratch_ptr <= SCRATCH_SIZE, "Out of scratch space"
         return addr
 
-    def scratch_const(self, val):
+    def scratch_const(self, val, body):
         if val not in self.const_map:
             addr = self.alloc_scratch(f"const_{val}")
-            self.add("load", ("const", addr, val))
+            body.add("load", ("const", addr, val))
             self.const_map[val] = addr
         return self.const_map[val]
 
-    def scratch_const_vector(self, val):
+    def scratch_const_vector(self, val, body):
         if val in self.const_map_vector:
             return self.const_map_vector[val]
-        scalar = self.scratch_const(val)
+        scalar = self.scratch_const(val, body)
         scratch = self.alloc_scratch(f"const_vec_{val}", length=VLEN)
-        self.add("valu", ("vbroadcast", scratch, scalar))
+        body.add("valu", ("vbroadcast", scratch, scalar))
         return scratch
 
-    def scratch_const_vector_from_scalar(self, scalar):
+    def scratch_const_vector_from_scalar(self, scalar, body):
         # Takes in addresses in scratch mem
         if scalar in self.const_map_scalar:
             return self.const_map_vector[scalar]
         scratch = self.alloc_scratch(f"const_vec_from_scalar_addr_{scalar}", length=VLEN)
-        self.add("valu", ("vbroadcast", scratch, scalar))
+        body.add("valu", ("vbroadcast", scratch, scalar))
         return scratch
 
-    def build_hash(self, val_hash_addr, tmp1, tmp2, round, i):
+    def build_hash(self, val_hash_addr, tmp1, tmp2, round, i, body):
         slots = []
 
         for hi, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
-            slots.append(("alu", (op1, tmp1, val_hash_addr, self.scratch_const(val1))))
-            slots.append(("alu", (op3, tmp2, val_hash_addr, self.scratch_const(val3))))
+            slots.append(("alu", (op1, tmp1, val_hash_addr, self.scratch_const(val1, body))))
+            slots.append(("alu", (op3, tmp2, val_hash_addr, self.scratch_const(val3, body))))
             slots.append(("alu", (op2, val_hash_addr, tmp1, tmp2)))
             slots.append(
                 (
@@ -118,8 +118,8 @@ class KernelBuilder:
     def build_hash_vectorized(self, body: "Appender", values_v, extra_slot):
         for i, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
             # body.append("debug", (f"print_scratch_v", f"before {i}", values_v))
-            body.append("valu", (op3, extra_slot, values_v, self.scratch_const_vector(val3)))
-            body.append("valu", (op1, values_v, values_v, self.scratch_const_vector(val1)))
+            body.append("valu", (op3, extra_slot, values_v, self.scratch_const_vector(val3, body)))
+            body.append("valu", (op1, values_v, values_v, self.scratch_const_vector(val1, body)))
             body.append("valu", (op2, values_v, values_v, extra_slot))
             # body.append("debug", (f"print_scratch_v", f"after {i}", values_v))
 
@@ -128,7 +128,7 @@ class KernelBuilder:
         Like reference_kernel2 but building actual instructions.
         Scalar implementation using only scalar ALU and load/store.
         """
-        tmp1 = self.alloc_scratch("tmp1")
+        # tmp1 = self.alloc_scratch("tmp1")
         # Scratch space addresses
         init_vars = [
             "rounds",
@@ -142,8 +142,9 @@ class KernelBuilder:
         for v in init_vars:
             self.alloc_scratch(v, 1)
         for i, v in enumerate(init_vars):
-            self.add("load", ("const", tmp1, i))
-            self.add("load", ("load", self.scratch[v], tmp1))
+            tmp = self.alloc_scratch(f"tmp{i}")
+            self.add("load", ("const", tmp, i))
+            self.add("load", ("load", self.scratch[v], tmp))
 
         # Pause instructions are matched up with yield statements in the reference
         # kernel to let you debug at intermediate steps. The testing harness in this
@@ -160,6 +161,9 @@ class KernelBuilder:
             def append(self, engine, slot):
                 self.body.append((engine, slot))
 
+            def add(self, engine, slot):
+                self.body.append((engine, slot))
+
             def get(self):
                 return self.body
 
@@ -167,7 +171,7 @@ class KernelBuilder:
         assert batch_size % VLEN == 0
 
         cur_levels = [0] * (batch_size // VLEN)
-        forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"])
+        forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"], body)
         for round in range(rounds):
             body.append("debug", ("print", f"=============ROUND {round}=============="))
             for i in range(batch_size // VLEN):
@@ -176,7 +180,7 @@ class KernelBuilder:
 
                 # Load indices
                 indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
-                body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8)))
+                body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
                 body.append("load", ("vload", indices_v, addr_indices))
 
                 # Load values
@@ -186,7 +190,7 @@ class KernelBuilder:
                         "+",
                         addr_values,
                         self.scratch["inp_values_p"],
-                        self.scratch_const(i * 8),
+                        self.scratch_const(i * 8, body),
                     ),
                 )
                 values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
@@ -233,14 +237,16 @@ class KernelBuilder:
                 modulo = forest_addr_v
                 body.append(
                     "valu",
-                    ("%", modulo, values_v, self.scratch_const_vector(2)),
+                    ("%", modulo, values_v, self.scratch_const_vector(2, body)),
                 )
-                body.append("valu", ("+", modulo, modulo, self.scratch_const_vector(1)))
+                body.append("valu", ("+", modulo, modulo, self.scratch_const_vector(1, body)))
 
                 # Update the indices
                 cur_levels[i] += 1
                 if cur_levels[i] <= forest_height:
-                    body.append("valu", ("multiply_add", indices_v, indices_v, self.scratch_const_vector(2), modulo))
+                    body.append(
+                        "valu", ("multiply_add", indices_v, indices_v, self.scratch_const_vector(2, body), modulo)
+                    )
                 else:
                     body.append("valu", ("^", indices_v, indices_v, indices_v))
                     cur_levels[i] = 0
@@ -350,7 +356,7 @@ class Tests(unittest.TestCase):
     def test_kernel_cycles(self):
         return
         # do_kernel_test(10, 16, 256)
-        do_kernel_test(1, 1, 8, trace=True, prints=False)
+        do_kernel_test(1, 1, 16, trace=True, prints=False)
 
 
 # To run all the tests:

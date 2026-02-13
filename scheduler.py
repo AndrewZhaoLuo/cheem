@@ -18,8 +18,9 @@ def get_dests(slot: tuple) -> Set[int]:
 def get_srcs(slot: tuple) -> Set[int]:
     engine, inst = slot
     if engine in ["valu", "alu", "load", "store", "hint"]:
-        if inst[0] == "load_offset":
-            return {inst[2]}
+        if inst[0] in ["const"]:
+            return set()
+
         return set(inst[2:])
 
     if engine in ["flow"]:
