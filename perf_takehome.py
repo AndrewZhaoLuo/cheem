@@ -374,3 +374,17 @@ class Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+"""
+Things i did:
+1. basic vectorized version
+2. simple scheduler
+3. make scheduler better by adding hints to deal with certain instructions (for ordering)
+
+Things i need to do:
+4. non-greedy scheduling 
+5. optimization of top of tree using vselect
+6. alternative alu version scalar
+7. alternative alu version using control flow
+8. other misc. optimization
+"""
