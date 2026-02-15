@@ -55,8 +55,8 @@ class KernelBuilder:
     def build(self, slots: list[tuple[Engine, tuple]], vliw: bool = True):
         # Simple slot packing that just uses one slot per instruction bundle
         if vliw:
-            return Scheduler(self, slots).schedule_greedy()
-            # return Scheduler(self, slots).schedule_critical_path()
+            # return Scheduler(self, slots).schedule_greedy()
+            return Scheduler(self, slots).schedule_critical_path()
 
         instrs = []
         for engine, slot in slots:
@@ -356,7 +356,7 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                if i < batch_size // VLEN // 4:
+                if i <= batch_size // VLEN // 4:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
