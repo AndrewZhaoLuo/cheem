@@ -1,7 +1,7 @@
 from problem import SLOT_LIMITS, Engine
 from typing import List, Dict, Tuple, Set, Deque
 from collections import defaultdict, deque
-
+from queue import PriorityQueue
 
 def get_dests(slot: tuple) -> Set[int]:
     engine, inst = slot
@@ -91,7 +91,7 @@ class Scheduler:
             for src in srcs:
                 reads[src].add(i)
 
-    def schedule(self) -> List[Dict[Engine, List[Tuple]]]:
+    def schedule_greedy(self) -> List[Dict[Engine, List[Tuple]]]:
         ready_slots: Dict[Engine, Deque[int]] = {
             "valu": deque(),
             "alu": deque(),
@@ -149,6 +149,84 @@ class Scheduler:
         answer = []
         while num_scheduled_slots < len(self.slots):
             bundle = schedule_greedy()
+            # print(bundle)
+            answer.append(bundle)
+        return answer
+
+    def schedule_critical_path(self) -> List[Dict[Engine, List[Tuple]]]:
+        ready_slots: Dict[Engine, PriorityQueue] = {
+            "valu": PriorityQueue(),
+            "alu": PriorityQueue(),
+            "load": PriorityQueue(),
+            "store": PriorityQueue(),
+            "flow": PriorityQueue(),
+            "debug": PriorityQueue(),
+            "hint": PriorityQueue(),
+        }
+
+        num_scheduled_slots = 0
+        dep_count: List[int] = [len(self.dependency_map[i]) for i in range(len(self.slots))]
+
+        # map of instruction index --> length / "priority"
+        # the priority is negative because PriorityQueue takes the smallest values first
+        path_lengths: Dict[int, int] = {}
+        for i in range(len(self.slots) - 1, -1, -1):
+            if i not in path_lengths:
+                path_lengths[i] = 0
+            for dep in self.dependency_map[i]:
+                if dep not in path_lengths:
+                    path_lengths[dep] = 0
+                path_lengths[dep] = min(path_lengths[dep], path_lengths[i] - 1)
+
+        def add_slot(i):
+            slot = self.slots[i]
+            engine, _ = slot
+            priority = path_lengths[i] 
+
+            # We want to prioritize the load at all cost, do lookahead 
+            additional_priority_for_load = priority
+            ready_slots[engine].put((i, additional_priority_for_load))
+
+        def free_dep(i):
+            dep_count[i] -= 1
+            assert dep_count[i] >= 0
+            if dep_count[i] == 0:
+                add_slot(i)
+
+        def schedule() -> Dict[Engine, List[Tuple]]:
+            nonlocal num_scheduled_slots
+
+            bundle: Dict[Engine, List[Tuple]] = {"valu": [], "alu": [], "load": [], "store": [], "flow": []}
+            for engine, limit in SLOT_LIMITS.items():
+                while not ready_slots[engine].empty() and len(bundle[engine]) < limit:
+                    i, _priority = ready_slots[engine].get()
+                    bundle[engine].append(i)
+
+            # canonicalize things
+            for k, v in bundle.items():
+                for e, i in enumerate(v):
+                    for j in self.free_map[i]:
+                        free_dep(j)
+                    v[e] = self.slots[i]
+                    num_scheduled_slots += 1
+
+            # resolve hints immediately
+            while not ready_slots["hint"].empty():
+                next_hint_i, _priority = ready_slots["hint"].get()
+                for j in self.free_map[next_hint_i]:
+                    free_dep(j)
+                num_scheduled_slots += 1
+
+            return {k: [vv[1] for vv in v] for k, v in bundle.items() if len(v) > 0}
+
+        for i, cnt in enumerate(dep_count):
+            if cnt == 0:
+                add_slot(i)
+
+        answer = []
+        while num_scheduled_slots < len(self.slots):
+            bundle = schedule()
+            # print(num_scheduled_slots, '/', len(self.slots))
             # print(bundle)
             answer.append(bundle)
         return answer
