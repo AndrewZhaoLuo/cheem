@@ -53,6 +53,7 @@ SLOT_LIMITS = {
     "store": 2,
     "flow": 1,
     "debug": 64,
+    "hint": 64
 }
 
 VLEN = 8
@@ -350,6 +351,7 @@ class Machine:
             "load": self.load,
             "store": self.store,
             "flow": self.flow,
+            
         }
         self.scratch_write = {}
         self.mem_write = {}
@@ -380,6 +382,8 @@ class Machine:
                         print(f"{core.scratch[addr]}")
                     elif slot[0] == "print":
                         print(*slot[1:])
+                continue
+            elif name == "hint":
                 continue
             assert len(slots) <= SLOT_LIMITS[name]
             for i, slot in enumerate(slots):

@@ -124,6 +124,14 @@ class KernelBuilder:
             body.append("valu", (op2, values_v, values_v, extra_slot))
             # body.append("debug", (f"print_scratch_v", f"after {i}", values_v))
 
+    def build_hash_scalar(self, body: "Appender", values, extra_slot):
+        for i, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
+            # body.append("debug", (f"print_scratch_v", f"before {i}", values_v))
+            body.append("alu", (op3, extra_slot, values, self.scratch_const(val3, body)))
+            body.append("alu", (op1, values, values, self.scratch_const(val1, body)))
+            body.append("alu", (op2, values, values, extra_slot))
+            # body.append("debug", (f"print_scratch_v", f"after {i}", values_v))
+
     def build_kernel(self, forest_height: int, n_nodes: int, batch_size: int, rounds: int):
         """
         Like reference_kernel2 but building actual instructions.
@@ -176,7 +184,7 @@ class KernelBuilder:
         for round in range(rounds):
             body.append("debug", ("print", f"=============ROUND {round}=============="))
             for i in range(batch_size // VLEN):
-                def schedule_loop(use_alu: bool = False):
+                def schedule_loop_vector():
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
 
@@ -266,9 +274,89 @@ class KernelBuilder:
                     body.append("store", ("vstore", addr_indices, indices_v))
                     body.append("store", ("vstore", addr_values, values_v))
 
-                schedule_loop()
+                def schedule_loop_scalar():
+                    addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
+                    addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
 
-        body_instrs = self.build(body.get())
+                    # Load indices
+                    indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
+
+                    if round == 0: # prologue 
+                        body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
+                        body.append("load", ("vload", indices_v, addr_indices))
+                        for vi in range(VLEN):
+                            body.append("hint", ("join_dst", indices_v + vi, indices_v))
+
+                    # Load values
+                    body.append(
+                        "alu",
+                        (
+                            "+",
+                            addr_values,
+                            self.scratch["inp_values_p"],
+                            self.scratch_const(i * 8, body),
+                        ),
+                    )
+                    values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
+
+                    if round == 0: # prologue
+                        body.append("load", ("vload", values_v, addr_values))
+                        for vi in range(VLEN):
+                            body.append("hint", ("join_dst", values_v + vi, values_v))
+
+                    # calculates loads
+                    forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
+                    for vi in range(VLEN):
+                        body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v  + vi, indices_v + vi))
+                    forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
+
+                    # Load data from nodes
+                    for load_i in range(VLEN):
+                        body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
+
+                    modulo = forest_addr_v
+                    for vi in range(VLEN):
+                        body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
+                        self.build_hash_scalar(body, values_v + vi, forest_v + vi)
+
+                        body.append(
+                            "alu",
+                            ("%", modulo + vi, values_v + vi, self.scratch_const(2, body)),
+                        )
+                        body.append("alu", ("+", modulo + vi, modulo + vi, self.scratch_const(1, body)))
+
+                    cur_levels[i] += 1 
+
+                    if cur_levels[i] <= forest_height:
+                        for vi in range(VLEN):
+                            body.append(
+                                "alu", ("*", indices_v + vi, indices_v  + vi, self.scratch_const(2, body))
+                            )
+                            body.append(
+                                "alu", ("+", indices_v + vi, indices_v  + vi, modulo + vi)
+                            )
+                    else:
+                        for vi in range(VLEN):
+                            body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
+                        cur_levels[i] = 0
+
+                    hints_indices_v = ["join_dst", indices_v]
+                    hints_values_v = ["join_dst", values_v]
+                    for vi in range(VLEN):
+                        hints_indices_v.append(indices_v + vi)
+                        hints_values_v.append(values_v + vi)
+                    body.append("hint", tuple(hints_indices_v))
+                    body.append("hint", tuple(hints_values_v))
+
+                    # Write batch back to memory
+                    body.append("store", ("vstore", addr_indices, indices_v))
+                    body.append("store", ("vstore", addr_values, values_v))
+
+
+                #schedule_loop_vector()
+                schedule_loop_scalar()
+
+        body_instrs = self.build(body.get(), False)
         print("TOTAL SCRATCH SPACE:", self.scratch_ptr)
         self.instrs.extend(body_instrs)
         # Required to match with the yield in reference_kernel2
