@@ -273,7 +273,6 @@ class KernelBuilder:
                     # Write batch back to memory
                     body.append("store", ("vstore", addr_indices, indices_v))
                     body.append("store", ("vstore", addr_values, values_v))
-
                 def schedule_loop_scalar():
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
@@ -352,11 +351,13 @@ class KernelBuilder:
                     body.append("store", ("vstore", addr_indices, indices_v))
                     body.append("store", ("vstore", addr_values, values_v))
 
+                # breakpoint()
+                if i <= batch_size // VLEN // 4:
+                    schedule_loop_scalar()
+                else:
+                    schedule_loop_vector()
 
-                #schedule_loop_vector()
-                schedule_loop_scalar()
-
-        body_instrs = self.build(body.get(), False)
+        body_instrs = self.build(body.get())
         print("TOTAL SCRATCH SPACE:", self.scratch_ptr)
         self.instrs.extend(body_instrs)
         # Required to match with the yield in reference_kernel2
