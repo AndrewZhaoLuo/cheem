@@ -55,8 +55,8 @@ class KernelBuilder:
     def build(self, slots: list[tuple[Engine, tuple]], vliw: bool = True):
         # Simple slot packing that just uses one slot per instruction bundle
         if vliw:
-            #return Scheduler(self, slots).schedule_greedy()
-            return Scheduler(self, slots).schedule_critical_path()
+            return Scheduler(self, slots).schedule_greedy()
+            # return Scheduler(self, slots).schedule_critical_path()
 
         instrs = []
         for engine, slot in slots:
@@ -178,7 +178,7 @@ class KernelBuilder:
             for i in range(batch_size // VLEN):
                 def schedule_loop(use_alu: bool = False):
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
-                    addr_values = self.alloc_scratch(f"addr_values_batch_{i}", VLEN)
+                    addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
 
                     # Load indices
                     indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
