@@ -356,7 +356,8 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                if i <= batch_size // VLEN // 4:
+                assert batch_size == 256
+                if i in [0, 4, 8, 12, 16, 20, 24, 28, 31]:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
