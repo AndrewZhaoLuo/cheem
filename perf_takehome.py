@@ -73,6 +73,8 @@ class KernelBuilder:
                 return self.scratch[name]
             self.scratch[name] = addr
             self.scratch_debug[addr] = (name, length)
+            for i in range(1, length):
+                self.scratch_debug[addr + i] = (f"{name}_offset_{i}", 1)
         self.scratch_ptr += length
         assert self.scratch_ptr <= SCRATCH_SIZE, "Out of scratch space"
         return addr
@@ -271,8 +273,9 @@ class KernelBuilder:
                     # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
 
                     # Write batch back to memory
-                    body.append("store", ("vstore", addr_indices, indices_v))
-                    body.append("store", ("vstore", addr_values, values_v))
+                    if round == rounds - 1:
+                        body.append("store", ("vstore", addr_indices, indices_v))
+                        body.append("store", ("vstore", addr_values, values_v))
                 def schedule_loop_scalar():
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
@@ -348,11 +351,12 @@ class KernelBuilder:
                     body.append("hint", tuple(hints_values_v))
 
                     # Write batch back to memory
-                    body.append("store", ("vstore", addr_indices, indices_v))
-                    body.append("store", ("vstore", addr_values, values_v))
+                    if round == rounds - 1:
+                        body.append("store", ("vstore", addr_indices, indices_v))
+                        body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                if i <= batch_size // VLEN // 4:
+                if i < batch_size // VLEN // 4:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
@@ -451,9 +455,9 @@ class Tests(unittest.TestCase):
     #             )
 
     def test_kernel_cycles(self):
-        return
         # do_kernel_test(10, 16, 256)
-        do_kernel_test(1, 1, 16, trace=True, prints=False)
+        # do_kernel_test(1, 1, 16, trace=True, prints=False)
+        pass 
 
 
 # To run all the tests:
