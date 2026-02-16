@@ -34,7 +34,7 @@ def get_srcs(slot: tuple) -> Set[int]:
 class Scheduler:
     def __init__(self, builder: "KernelBuilder", slots: list[tuple[Engine, tuple]]) -> None:
         self.builder = builder
-        self.slots = [s for s in slots if s[0] != "debug"]
+        self.slots = slots  # [s for s in slots if s[0] != "debug"]
 
         # map of instruction slot to dependencies before slot can run
         # also have reverse
@@ -60,6 +60,12 @@ class Scheduler:
         # map of resource --> when it was last read in current state
         reads: Dict[int, Set[int]] = defaultdict(set)
         for i, slot in enumerate(self.slots):
+            engine = slot[0]
+            if engine == "debug":
+                for j in range(i):
+                    self.add_dependence(i, j)
+                continue
+
             dests = get_dests(slot)
             srcs = get_srcs(slot)
             # print(i, slot, " --- ", dests, srcs)
@@ -120,7 +126,15 @@ class Scheduler:
         def schedule_greedy() -> Dict[Engine, List[Tuple]]:
             nonlocal num_scheduled_slots
 
-            bundle: Dict[Engine, List[Tuple]] = {"valu": [], "alu": [], "load": [], "store": [], "flow": [], "hint": []}
+            bundle: Dict[Engine, List[Tuple]] = {
+                "valu": [],
+                "alu": [],
+                "load": [],
+                "store": [],
+                "flow": [],
+                "hint": [],
+                "debug": [],
+            }
             for engine, limit in SLOT_LIMITS.items():
                 while len(ready_slots[engine]) > 0 and len(bundle[engine]) < limit:
                     i = ready_slots[engine].popleft()
@@ -197,7 +211,14 @@ class Scheduler:
         def schedule() -> Dict[Engine, List[Tuple]]:
             nonlocal num_scheduled_slots
 
-            bundle: Dict[Engine, List[Tuple]] = {"valu": [], "alu": [], "load": [], "store": [], "flow": []}
+            bundle: Dict[Engine, List[Tuple]] = {
+                "valu": [],
+                "alu": [],
+                "load": [],
+                "store": [],
+                "flow": [],
+                "debug": [],
+            }
             for engine, limit in SLOT_LIMITS.items():
                 while not ready_slots[engine].empty() and len(bundle[engine]) < limit:
                     i, _priority = ready_slots[engine].get()
