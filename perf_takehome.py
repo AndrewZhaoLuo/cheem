@@ -208,7 +208,25 @@ class KernelBuilder:
             body.append("debug", ("print", f"=============ROUND {round}=============="))
             for i in range(batch_size // VLEN):
 
-                def schedule_loop_vector():
+                def load_tree(use_vselect: bool, forest_v, forest_addr_v):
+                    if use_vselect:
+                        if round % (forest_height + 1) == 0:
+                            addr = self.scratch["forest_values_p"]
+                            body.append("load", ("vload", forest_v, addr))
+                        else:
+                            raise NotImplementedError("Error")
+                    else:
+                        # Load data from nodes
+                        for load_i in range(VLEN):
+                            body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
+                            body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
+
+                        join_dst = ["join_dst", forest_v]
+                        for load_i in range(VLEN):
+                            join_dst.append(forest_v + load_i)
+                        body.append("hint", tuple(join_dst))
+
+                def schedule_loop_vector(use_vselect: bool = False):
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
 
@@ -241,15 +259,7 @@ class KernelBuilder:
                     body.append("valu", ("+", forest_addr_v, forest_values_p_v, indices_v))
                     forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
 
-                    # Load data from nodes
-                    for load_i in range(VLEN):
-                        body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
-                        body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
-
-                    join_dst = ["join_dst", forest_v]
-                    for load_i in range(VLEN):
-                        join_dst.append(forest_v + load_i)
-                    body.append("hint", tuple(join_dst))
+                    load_tree(use_vselect, forest_v, forest_addr_v)
 
                     # forest_v --> the bintree values
                     # values_v --> the values in our array
@@ -301,7 +311,7 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_indices, indices_v))
                         body.append("store", ("vstore", addr_values, values_v))
 
-                def schedule_loop_scalar():
+                def schedule_loop_scalar(use_vselect: bool = False):
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
 
@@ -340,8 +350,7 @@ class KernelBuilder:
                     forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
 
                     # Load data from nodes
-                    for load_i in range(VLEN):
-                        body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
+                    load_tree(use_vselect, forest_v, forest_addr_v)
 
                     modulo = forest_addr_v
                     for vi in range(VLEN):
