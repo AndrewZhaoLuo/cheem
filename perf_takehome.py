@@ -376,13 +376,15 @@ class KernelBuilder:
             body.append("debug", ("print_scratch_v", "forest_v", forest_v))
             body.append("debug", ("print_scratch_v", "indices_v", indices_v))
 
-            modulo = forest_addr_v
             for vi in range(VLEN):
                 body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
                 self.build_hash_scalar(body, values_v + vi, forest_v + vi)
+            add_vwrite_hint(values_v)
+            add_vread_hint(values_v)
 
             cur_levels[i] += 1
 
+            modulo = forest_addr_v
             if cur_levels[i] <= forest_height:
                 for vi in range(VLEN):
                     body.append(
@@ -397,13 +399,10 @@ class KernelBuilder:
                     body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
                 cur_levels[i] = 0
 
-            hints_indices_v = ["join_dst", indices_v]
-            hints_values_v = ["join_dst", values_v]
-            for vi in range(VLEN):
-                hints_indices_v.append(indices_v + vi)
-                hints_values_v.append(values_v + vi)
-            body.append("hint", tuple(hints_indices_v))
-            body.append("hint", tuple(hints_values_v))
+            add_vread_hint(indices_v)
+            add_vwrite_hint(indices_v)
+            add_vread_hint(values_v)
+            add_vwrite_hint(values_v)
 
             # Write batch back to memory
             if round == rounds - 1:
@@ -470,6 +469,8 @@ def do_kernel_test(
         ):
             print("actual:", machine.mem)
             print("ref   :", ref_mem)
+            print("CYCLES: ", machine.cycle)
+            print("Speedup over baseline: ", BASELINE / machine.cycle)
             raise AssertionError(f"Incorrect result on round {i}")
         inp_indices_p = ref_mem[5]
         if prints:
