@@ -12,7 +12,7 @@ USE_OPTIMIZED_HASH = True
 
 # Whether to run one round on a simple tree with batch size 8
 # (tree_height, rounds, batch_size)
-WORKLOAD = (0, 500, 16)
+WORKLOAD = (10, 16, 256)
 
 # Whether to enable vselect algorithm for loading
 USE_VSELECT_ALGO = True

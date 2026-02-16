@@ -354,15 +354,19 @@ class KernelBuilder:
             if round == 0:  # prologue
                 body.append("load", ("vload", values_v, addr_values))
             add_vwrite_hint(values_v)
+            add_vread_hint(values_v)
 
             # calculates loads
             forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
             for vi in range(VLEN):
                 body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
+            add_vread_hint(forest_addr_v)
+            add_vwrite_hint(forest_addr_v)
 
             # Load data from nodes
             forest_v = load_tree(round, i, use_vselect, forest_addr_v)
             add_vwrite_hint(forest_v)
+            add_vread_hint(forest_v)
 
             # forest_v --> the bintree values
             # values_v --> the values in our array
