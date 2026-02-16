@@ -156,7 +156,7 @@ class Machine:
                 f'{{"name": "process_name", "ph": "M", "pid": {ci}, "tid": 0, "args": {{"name":"Core {ci}"}}}},\n'
             )
             for name, limit in SLOT_LIMITS.items():
-                if name == "debug":
+                if name == "hint":
                     continue
                 for i in range(limit):
                     tid_counter += 1
@@ -168,7 +168,7 @@ class Machine:
         # Add zero-length events at the start so all slots show up in Perfetto
         for ci, core in enumerate(self.cores):
             for name, limit in SLOT_LIMITS.items():
-                if name == "debug":
+                if name == "hint":
                     continue
                 for i in range(limit):
                     tid = self.tids[(ci, name, i)]
@@ -285,6 +285,35 @@ class Machine:
             case _:
                 raise NotImplementedError(f"Unknown store op {slot}")
 
+    def debug(self, core, *slot):
+        if not self.enable_debug:
+            return
+        if slot[0] == "compare":
+            loc, key = slot[1], slot[2]
+            ref = self.value_trace[key]
+            res = core.scratch[loc]
+            assert res == ref, f"{res} != {ref} for {key} at pc={core.pc}"
+        elif slot[0] == "vcompare":
+            loc, keys = slot[1], slot[2]
+            ref = [self.value_trace[key] for key in keys]
+            res = core.scratch[loc : loc + VLEN]
+            assert res == ref, f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
+        elif slot[0] == "print_scratch_v":
+            name, addr = slot[1], slot[2]
+            print(f"scratch_v {name}: ", end="")
+            for i in range(VLEN):
+                print(f"{core.scratch[addr + i]}", end=" ")
+            print()
+        elif slot[0] == "print_scratch":
+            name, addr = slot[1], slot[2]
+            print(f"scratch_v {name}: ", end="")
+            print(f"{core.scratch[addr]}")
+        elif slot[0] == "print":
+            print(*slot[1:])
+
+    def hint(self, core, *slot):
+        pass
+
     def flow(self, core, *slot):
         match slot:
             case ("select", dest, cond, a, b):
@@ -343,38 +372,13 @@ class Machine:
             "load": self.load,
             "store": self.store,
             "flow": self.flow,
+            "debug": self.debug,
+            "hint": self.hint,
         }
         self.scratch_write = {}
         self.mem_write = {}
         for name, slots in instr.items():
-            if name == "debug":
-                if not self.enable_debug:
-                    continue
-                for slot in slots:
-                    if slot[0] == "compare":
-                        loc, key = slot[1], slot[2]
-                        ref = self.value_trace[key]
-                        res = core.scratch[loc]
-                        assert res == ref, f"{res} != {ref} for {key} at pc={core.pc}"
-                    elif slot[0] == "vcompare":
-                        loc, keys = slot[1], slot[2]
-                        ref = [self.value_trace[key] for key in keys]
-                        res = core.scratch[loc : loc + VLEN]
-                        assert res == ref, f"{res} != {ref} for {keys} at pc={core.pc} loc={loc}"
-                    elif slot[0] == "print_scratch_v":
-                        name, addr = slot[1], slot[2]
-                        print(f"scratch_v {name}: ", end="")
-                        for i in range(VLEN):
-                            print(f"{core.scratch[addr + i]}", end=" ")
-                        print()
-                    elif slot[0] == "print_scratch":
-                        name, addr = slot[1], slot[2]
-                        print(f"scratch_v {name}: ", end="")
-                        print(f"{core.scratch[addr]}")
-                    elif slot[0] == "print":
-                        print(*slot[1:])
-                continue
-            elif name == "hint":
+            if name == "hint":
                 continue
             assert len(slots) <= SLOT_LIMITS[name]
             for i, slot in enumerate(slots):

@@ -371,6 +371,9 @@ class KernelBuilder:
             body.append("debug", ("print_scratch_v", "forest_v", forest_v))
             body.append("debug", ("print_scratch_v", "indices_v", indices_v))
 
+            for vi in range(VLEN):
+                body.append("hint", ("join_dst", forest_v + vi, forest_v))
+
             modulo = forest_addr_v
             for vi in range(VLEN):
                 body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
