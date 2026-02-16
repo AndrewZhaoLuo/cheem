@@ -37,7 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
-from config import USE_SCALAR, SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
+from config import SCALAR_SCHEDULE, SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
 
 
 class KernelBuilder:
@@ -379,7 +379,7 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                if i in [0, 4, 7, 11, 15, 20, 24, 28, 31] and USE_SCALAR:
+                if i in SCALAR_SCHEDULE:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
