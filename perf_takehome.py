@@ -49,6 +49,7 @@ class KernelBuilder:
         self.const_map = {}
         self.const_map_vector = {}
         self.const_map_scalar = {}
+        self.const_map_addr = {}
 
     def debug_info(self):
         return DebugInfo(scratch_map=self.scratch_debug)
@@ -97,6 +98,7 @@ class KernelBuilder:
         scalar = self.scratch_const(val, body)
         scratch = self.alloc_scratch(f"const_vec_{val}", length=VLEN)
         body.add("valu", ("vbroadcast", scratch, scalar))
+        self.const_map_vector[val] = scratch
         return scratch
 
     def scratch_const_vector_from_scalar(self, scalar, body):
@@ -105,6 +107,19 @@ class KernelBuilder:
             return self.const_map_vector[scalar]
         scratch = self.alloc_scratch(f"const_vec_from_scalar_addr_{scalar}", length=VLEN)
         body.add("valu", ("vbroadcast", scratch, scalar))
+        self.const_map_vector[scalar] = scratch
+        return scratch
+
+    def scratch_const_vector_from_addr_load(self, addr, body):
+        if addr in self.const_map_addr:
+            return self.const_map_addr[addr]
+        scratch = self.alloc_scratch(f"const_vec_from_load_addr_{addr}", length=VLEN)
+        body.add("load", ("load", scratch, addr))
+        body.add("valu", ("vbroadcast", scratch, scratch))
+        for vi in range(VLEN):
+            body.add("hint", ("join_dst", scratch + vi, scratch))
+
+        self.const_map_addr[addr] = scratch
         return scratch
 
     def build_hash(self, val_hash_addr, tmp1, tmp2, round, i, body):
