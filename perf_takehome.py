@@ -205,15 +205,14 @@ class KernelBuilder:
         cur_levels = [0] * (batch_size // VLEN)
         forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"], body)
 
-        load_tree_levels = set()
-
         def load_tree(round: int, i: int, use_vselect: bool, forest_addr_v):
             if use_vselect:
                 if round % (forest_height + 1) == 0:
                     addr = self.scratch["forest_values_p"]
-                    val = self.alloc_scratch("load_tree_vselect_height_0")
+                    val = self.alloc_scratch("load_tree_vselect_height_0_batch_{i}", VLEN)
                     body.append("load", ("load", val, addr))
-                    return self.scratch_const_vector_from_scalar(val, body)
+                    body.append("valu", ("vbroadcast", val, val))
+                    return val
                 else:
                     raise NotImplementedError("Error")
             else:
@@ -347,6 +346,8 @@ class KernelBuilder:
 
             # Load data from nodes
             forest_v = load_tree(round, i, use_vselect, forest_addr_v)
+            for vi in range(VLEN):
+                body.append("hint", ("join_dst", forest_v + vi, forest_v))
 
             modulo = forest_addr_v
             for vi in range(VLEN):
