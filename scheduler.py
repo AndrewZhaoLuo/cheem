@@ -3,6 +3,7 @@ from typing import List, Dict, Tuple, Set, Deque
 from collections import defaultdict, deque
 from queue import PriorityQueue
 
+
 def get_dests(slot: tuple) -> Set[int]:
     engine, inst = slot
     if engine in ["valu", "alu", "load", "store", "hint"]:
@@ -181,9 +182,9 @@ class Scheduler:
         def add_slot(i):
             slot = self.slots[i]
             engine, _ = slot
-            priority = path_lengths[i] 
+            priority = path_lengths[i]
 
-            # We want to prioritize the load at all cost, do lookahead 
+            # We want to prioritize the load at all cost, do lookahead
             additional_priority_for_load = priority
             ready_slots[engine].put((i, additional_priority_for_load))
 

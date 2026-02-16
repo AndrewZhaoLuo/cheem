@@ -186,6 +186,7 @@ class KernelBuilder:
         for round in range(rounds):
             body.append("debug", ("print", f"=============ROUND {round}=============="))
             for i in range(batch_size // VLEN):
+
                 def schedule_loop_vector():
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
@@ -193,8 +194,10 @@ class KernelBuilder:
                     # Load indices
                     indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
 
-                    if round == 0: # prologue 
-                        body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
+                    if round == 0:  # prologue
+                        body.append(
+                            "alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body))
+                        )
                         body.append("load", ("vload", indices_v, addr_indices))
 
                     # Load values
@@ -209,7 +212,7 @@ class KernelBuilder:
                     )
                     values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
 
-                    if round == 0: # prologue
+                    if round == 0:  # prologue
                         body.append("load", ("vload", values_v, addr_values))
 
                     # calculates loads
@@ -276,6 +279,7 @@ class KernelBuilder:
                     if round == rounds - 1:
                         body.append("store", ("vstore", addr_indices, indices_v))
                         body.append("store", ("vstore", addr_values, values_v))
+
                 def schedule_loop_scalar():
                     addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
                     addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
@@ -283,8 +287,10 @@ class KernelBuilder:
                     # Load indices
                     indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
 
-                    if round == 0: # prologue 
-                        body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
+                    if round == 0:  # prologue
+                        body.append(
+                            "alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body))
+                        )
                         body.append("load", ("vload", indices_v, addr_indices))
                         for vi in range(VLEN):
                             body.append("hint", ("join_dst", indices_v + vi, indices_v))
@@ -301,7 +307,7 @@ class KernelBuilder:
                     )
                     values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
 
-                    if round == 0: # prologue
+                    if round == 0:  # prologue
                         body.append("load", ("vload", values_v, addr_values))
                         for vi in range(VLEN):
                             body.append("hint", ("join_dst", values_v + vi, values_v))
@@ -309,7 +315,7 @@ class KernelBuilder:
                     # calculates loads
                     forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
                     for vi in range(VLEN):
-                        body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v  + vi, indices_v + vi))
+                        body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
                     forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
 
                     # Load data from nodes
@@ -327,16 +333,12 @@ class KernelBuilder:
                         )
                         body.append("alu", ("+", modulo + vi, modulo + vi, self.scratch_const(1, body)))
 
-                    cur_levels[i] += 1 
+                    cur_levels[i] += 1
 
                     if cur_levels[i] <= forest_height:
                         for vi in range(VLEN):
-                            body.append(
-                                "alu", ("*", indices_v + vi, indices_v  + vi, self.scratch_const(2, body))
-                            )
-                            body.append(
-                                "alu", ("+", indices_v + vi, indices_v  + vi, modulo + vi)
-                            )
+                            body.append("alu", ("*", indices_v + vi, indices_v + vi, self.scratch_const(2, body)))
+                            body.append("alu", ("+", indices_v + vi, indices_v + vi, modulo + vi))
                     else:
                         for vi in range(VLEN):
                             body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
@@ -458,7 +460,7 @@ class Tests(unittest.TestCase):
     def test_kernel_cycles(self):
         # do_kernel_test(10, 16, 256)
         # do_kernel_test(1, 1, 16, trace=True, prints=False)
-        pass 
+        pass
 
 
 # To run all the tests:

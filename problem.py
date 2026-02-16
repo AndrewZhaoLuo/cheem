@@ -46,15 +46,7 @@ def cdiv(a, b):
     return (a + b - 1) // b
 
 
-SLOT_LIMITS = {
-    "alu": 12,
-    "valu": 6,
-    "load": 2,
-    "store": 2,
-    "flow": 1,
-    "debug": 64,
-    "hint": 64
-}
+SLOT_LIMITS = {"alu": 12, "valu": 6, "load": 2, "store": 2, "flow": 1, "debug": 64, "hint": 64}
 
 VLEN = 8
 # Older versions of the take-home used multiple cores, but this version only uses 1
@@ -351,7 +343,6 @@ class Machine:
             "load": self.load,
             "store": self.store,
             "flow": self.flow,
-            
         }
         self.scratch_write = {}
         self.mem_write = {}
