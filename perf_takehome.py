@@ -37,7 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
-from config import SCALAR_SCHEDULE, SCHEDULER, USE_OPTIMIZED_HASH, WORKLOAD, USE_VSELECT_ALGO
+from config import SCALAR_SCHEDULE, SCHEDULER, USE_OPTIMIZED_HASH, WORKLOAD, USE_VSELECT_ALGO, SCHEDULER_DEBUG
 
 
 class KernelBuilder:
@@ -56,11 +56,12 @@ class KernelBuilder:
 
     def build(self, slots: list[tuple[Engine, tuple]]):
         # Simple slot packing that just uses one slot per instruction bundle
+        scheduler = Scheduler(self, slots, SCHEDULER_DEBUG)
         match SCHEDULER:
             case "greedy":
-                return Scheduler(self, slots).schedule_greedy()
+                return scheduler.schedule_greedy()
             case "critical":
-                return Scheduler(self, slots).schedule_critical_path()
+                return scheduler.schedule_critical_path()
             case "none":
                 instrs = []
                 for engine, slot in slots:
@@ -220,13 +221,24 @@ class KernelBuilder:
         cur_levels = [0] * (batch_size // VLEN)
         forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"], body)
 
+        def add_vwrite_hint(aligned_addr):
+            # Use before scalar writes on aligned addr
+            for vi in range(VLEN):
+                body.append("hint", ("join_dst", aligned_addr + vi, aligned_addr))
+
+        def add_vread_hint(aligned_addr):
+            # use before vector reads on aligned addr
+            res = ["join_dst", aligned_addr]
+            for vi in range(VLEN):
+                res.append(aligned_addr + vi)
+            body.append("hint", tuple(res))
+
         def load_tree(round: int, i: int, use_vselect: bool, forest_addr_v):
             forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
             if use_vselect:
                 if round % (forest_height + 1) == 0:
                     addr = self.scratch["forest_values_p"]
                     pre_load = self.scratch_const_vector_from_addr_load(addr, body)
-                    forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
                     body.append("valu", ("+", forest_v, pre_load, self.scratch_const_vector(0, body)))
                 else:
                     raise NotImplementedError("Error")
@@ -332,36 +344,25 @@ class KernelBuilder:
             if round == 0:  # prologue
                 body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
                 body.append("load", ("vload", indices_v, addr_indices))
-                for vi in range(VLEN):
-                    body.append("hint", ("join_dst", indices_v + vi, indices_v))
+            add_vwrite_hint(indices_v)
 
-            # Load values
-            body.append(
-                "alu",
-                (
-                    "+",
-                    addr_values,
-                    self.scratch["inp_values_p"],
-                    self.scratch_const(i * 8, body),
-                ),
-            )
+            # Load values]
+            inp_value_p = self.scratch["inp_values_p"]
+            body.append("alu", ("+", addr_values, inp_value_p, self.scratch_const(i * 8, body)))
             values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
 
             if round == 0:  # prologue
                 body.append("load", ("vload", values_v, addr_values))
-                for vi in range(VLEN):
-                    body.append("hint", ("join_dst", values_v + vi, values_v))
+            add_vwrite_hint(values_v)
 
             # calculates loads
             forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
             for vi in range(VLEN):
                 body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
-            forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
 
             # Load data from nodes
             forest_v = load_tree(round, i, use_vselect, forest_addr_v)
-            for vi in range(VLEN):
-                body.append("hint", ("join_dst", forest_v + vi, forest_v))
+            add_vwrite_hint(forest_v)
 
             # forest_v --> the bintree values
             # values_v --> the values in our array
@@ -370,9 +371,6 @@ class KernelBuilder:
             body.append("debug", ("print_scratch_v", "values_v", values_v))
             body.append("debug", ("print_scratch_v", "forest_v", forest_v))
             body.append("debug", ("print_scratch_v", "indices_v", indices_v))
-
-            for vi in range(VLEN):
-                body.append("hint", ("join_dst", forest_v + vi, forest_v))
 
             modulo = forest_addr_v
             for vi in range(VLEN):

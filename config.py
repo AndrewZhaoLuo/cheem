@@ -5,13 +5,14 @@ SCALAR_SCHEDULE = [0, 2, 5, 7, 11, 15, 20, 24, 28, 31]
 # "greedy": simple greedy scheduler
 # "none": don't do vliw bundle creation
 SCHEDULER = "greedy"
+SCHEDULER_DEBUG = False
 
 # Use optimized hashes for certain steps
 USE_OPTIMIZED_HASH = True
 
 # Whether to run one round on a simple tree with batch size 8
 # (tree_height, rounds, batch_size)
-WORKLOAD = (0, 68, 8)
+WORKLOAD = (0, 500, 16)
 
 # Whether to enable vselect algorithm for loading
 USE_VSELECT_ALGO = True
