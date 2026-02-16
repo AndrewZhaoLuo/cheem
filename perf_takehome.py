@@ -37,7 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
-from config import USE_SCALAR, USE_SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
+from config import USE_SCALAR, SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
 
 
 class KernelBuilder:
@@ -53,16 +53,20 @@ class KernelBuilder:
     def debug_info(self):
         return DebugInfo(scratch_map=self.scratch_debug)
 
-    def build(self, slots: list[tuple[Engine, tuple]], vliw: bool = True):
+    def build(self, slots: list[tuple[Engine, tuple]]):
         # Simple slot packing that just uses one slot per instruction bundle
-        if vliw:
-            # return Scheduler(self, slots).schedule_greedy()
-            return Scheduler(self, slots).schedule_critical_path()
-
-        instrs = []
-        for engine, slot in slots:
-            instrs.append({engine: [slot]})
-        return instrs
+        match SCHEDULER:
+            case "greedy":
+                return Scheduler(self, slots).schedule_greedy()
+            case "critical":
+                return Scheduler(self, slots).schedule_critical_path()
+            case "none":
+                instrs = []
+                for engine, slot in slots:
+                    instrs.append({engine: [slot]})
+                return instrs
+            case _:
+                raise NotImplementedError(f"Unknown scheduler {SCHEDULER}")
 
     def add(self, engine, slot):
         self.instrs.append({engine: [slot]})
@@ -380,7 +384,7 @@ class KernelBuilder:
                 else:
                     schedule_loop_vector()
 
-        body_instrs = self.build(body.get(), vliw=USE_SCHEDULER)
+        body_instrs = self.build(body.get())
         print("TOTAL SCRATCH SPACE:", self.scratch_ptr)
         self.instrs.extend(body_instrs)
         # Required to match with the yield in reference_kernel2

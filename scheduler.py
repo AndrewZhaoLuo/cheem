@@ -100,6 +100,7 @@ class Scheduler:
             "store": deque(),
             "flow": deque(),
             "debug": deque(),
+            "hint": deque(),
         }
 
         num_scheduled_slots = 0
@@ -119,7 +120,7 @@ class Scheduler:
         def schedule_greedy() -> Dict[Engine, List[Tuple]]:
             nonlocal num_scheduled_slots
 
-            bundle: Dict[Engine, List[Tuple]] = {"valu": [], "alu": [], "load": [], "store": [], "flow": []}
+            bundle: Dict[Engine, List[Tuple]] = {"valu": [], "alu": [], "load": [], "store": [], "flow": [], "hint": []}
             for engine, limit in SLOT_LIMITS.items():
                 while len(ready_slots[engine]) > 0 and len(bundle[engine]) < limit:
                     i = ready_slots[engine].popleft()
