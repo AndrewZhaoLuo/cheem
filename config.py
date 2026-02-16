@@ -4,7 +4,7 @@ SCALAR_SCHEDULE = [0, 2, 5, 7, 11, 15, 20, 24, 28, 31]
 # "critical": uses critical path heuristic
 # "greedy": simple greedy scheduler
 # "none": don't do vliw bundle creation
-SCHEDULER = "greedy"
+SCHEDULER = "critical"
 SCHEDULER_DEBUG = False
 
 # Use optimized hashes for certain steps
@@ -15,4 +15,4 @@ USE_OPTIMIZED_HASH = True
 WORKLOAD = (10, 16, 256)
 
 # Whether to enable vselect algorithm for loading
-USE_VSELECT_ALGO = True
+USE_VSELECT_ALGO = False
