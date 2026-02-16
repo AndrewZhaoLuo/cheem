@@ -1,5 +1,5 @@
 # batch ids that should go ahead and be scheduled!
-SCALAR_SCHEDULE = []  # [1, 5, 7, 11, 15, 20, 24, 28, 31]
+SCALAR_SCHEDULE = [0, 1, 5, 7, 11, 15, 20, 24, 28, 31]
 
 # "critical": uses critical path heuristic
 # "greedy": simple greedy scheduler
@@ -14,4 +14,4 @@ USE_OPTIMIZED_HASH = True
 WORKLOAD = (10, 16, 256)
 
 # Whether to enable vselect algorithm for loading
-USE_VSELECT_ALGO = True
+USE_VSELECT_ALGO = False
