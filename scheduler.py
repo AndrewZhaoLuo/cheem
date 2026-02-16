@@ -100,7 +100,6 @@ class Scheduler:
             "store": deque(),
             "flow": deque(),
             "debug": deque(),
-            "hint": deque(),
         }
 
         num_scheduled_slots = 0

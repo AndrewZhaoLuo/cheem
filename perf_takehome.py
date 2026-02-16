@@ -37,6 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
+from config import USE_SCALAR, USE_SCHEDULER, USE_OPTIMIZED_VHASH, USE_SIMPLE_WORKLOAD
 
 
 class KernelBuilder:
@@ -121,9 +122,21 @@ class KernelBuilder:
     def build_hash_vectorized(self, body: "Appender", values_v, extra_slot):
         for i, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
             # body.append("debug", (f"print_scratch_v", f"before {i}", values_v))
-            body.append("valu", (op3, extra_slot, values_v, self.scratch_const_vector(val3, body)))
-            body.append("valu", (op1, values_v, values_v, self.scratch_const_vector(val1, body)))
-            body.append("valu", (op2, values_v, values_v, extra_slot))
+            if op3 == "<<" and op1 == "+" and op2 == "+" and USE_OPTIMIZED_VHASH:
+                body.append(
+                    "valu",
+                    (
+                        "multiply_add",
+                        values_v,
+                        values_v,
+                        self.scratch_const_vector(2**val3 + 1, body),
+                        self.scratch_const_vector(val1, body),
+                    ),
+                )
+            else:
+                body.append("valu", (op3, extra_slot, values_v, self.scratch_const_vector(val3, body)))
+                body.append("valu", (op1, values_v, values_v, self.scratch_const_vector(val1, body)))
+                body.append("valu", (op2, values_v, values_v, extra_slot))
             # body.append("debug", (f"print_scratch_v", f"after {i}", values_v))
 
     def build_hash_scalar(self, body: "Appender", values, extra_slot):
@@ -358,13 +371,12 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                assert batch_size == 256
-                if i in [0, 4, 8, 12, 16, 20, 24, 28, 31]:
+                if i in [0, 4, 8, 12, 16, 20, 24, 28, 31] and USE_SCALAR:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
 
-        body_instrs = self.build(body.get())
+        body_instrs = self.build(body.get(), vliw=USE_SCHEDULER)
         print("TOTAL SCRATCH SPACE:", self.scratch_ptr)
         self.instrs.extend(body_instrs)
         # Required to match with the yield in reference_kernel2
@@ -445,8 +457,10 @@ class Tests(unittest.TestCase):
 
     def test_kernel_trace(self):
         # Full-scale example for performance testing
-        # do_kernel_test(10, 16, 256, trace=True, prints=False)
-        do_kernel_test(10, 16, 256, trace=True, prints=False)
+        if USE_SIMPLE_WORKLOAD:
+            do_kernel_test(0, 1, 8, trace=True, prints=False)
+        else:
+            do_kernel_test(10, 16, 256, trace=True, prints=False)
 
     # Passing this test is not required for submission, see submission_tests.py for the actual correctness test
     # You can uncomment this if you think it might help you debug

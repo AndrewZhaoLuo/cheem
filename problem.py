@@ -11,8 +11,8 @@ from enum import Enum
 from typing import Any, Literal
 import random
 
-ENGINE_NAMES = ["alu", "load", "store", "flow", "valu", "debug"]
-Engine = Literal["alu", "load", "store", "flow", "valu", "debug"]
+ENGINE_NAMES = ["alu", "load", "store", "flow", "valu", "debug", "hint"]
+Engine = Literal["alu", "load", "store", "flow", "valu", "debug", "hint"]
 Instruction = dict[Engine, list[tuple]]
 
 
