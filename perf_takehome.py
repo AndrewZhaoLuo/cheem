@@ -37,7 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
-from config import SCALAR_SCHEDULE, SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
+from config import SCALAR_SCHEDULE, SCHEDULER, USE_OPTIMIZED_HASH, WORKLOAD, USE_VSELECT_ALGO
 
 
 class KernelBuilder:
@@ -204,194 +204,194 @@ class KernelBuilder:
 
         cur_levels = [0] * (batch_size // VLEN)
         forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"], body)
+
+        load_tree_levels = set()
+
+        def load_tree(round: int, i: int, use_vselect: bool, forest_addr_v):
+            if use_vselect:
+                if round % (forest_height + 1) == 0:
+                    addr = self.scratch["forest_values_p"]
+                    val = self.alloc_scratch("load_tree_vselect_height_0")
+                    body.append("load", ("load", val, addr))
+                    return self.scratch_const_vector_from_scalar(val, body)
+                else:
+                    raise NotImplementedError("Error")
+            else:
+                forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
+                # Load data from nodes
+                for load_i in range(VLEN):
+                    body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
+                    body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
+
+                join_dst = ["join_dst", forest_v]
+                for load_i in range(VLEN):
+                    join_dst.append(forest_v + load_i)
+                body.append("hint", tuple(join_dst))
+                return forest_v
+
+        def schedule_loop_vector(round: int, i: int, use_vselect: bool = False):
+            addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
+            addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
+
+            # Load indices
+            indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
+
+            if round == 0:  # prologue
+                body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
+                body.append("load", ("vload", indices_v, addr_indices))
+
+            # Load values
+            body.append(
+                "alu",
+                (
+                    "+",
+                    addr_values,
+                    self.scratch["inp_values_p"],
+                    self.scratch_const(i * 8, body),
+                ),
+            )
+            values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
+
+            if round == 0:  # prologue
+                body.append("load", ("vload", values_v, addr_values))
+
+            # calculates loads
+            forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
+            body.append("valu", ("+", forest_addr_v, forest_values_p_v, indices_v))
+
+            forest_v = load_tree(round, i, use_vselect, forest_addr_v)
+
+            # forest_v --> the bintree values
+            # values_v --> the values in our array
+            # indices_v --> the indices in our array
+            # body.append("debug", ("print", f"before work batch {i}"))
+            # body.append("debug", ("print_scratch_v", "values_v", values_v))
+            # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
+            # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
+
+            body.append("valu", ("^", values_v, values_v, forest_v))
+
+            # body.append("debug", ("print", f"before hash batch {i}"))
+            # body.append("debug", ("print_scratch_v", "values_v", values_v))
+            # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
+            # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
+
+            # At end, values_v has the correct values
+            self.build_hash_vectorized(body, values_v, forest_v)
+
+            # body.append("debug", ("print", f"after hash batch {i}"))
+            # body.append("debug", ("print_scratch_v", "values_v", values_v))
+            # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
+            # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
+
+            modulo = forest_addr_v
+            body.append(
+                "valu",
+                ("%", modulo, values_v, self.scratch_const_vector(2, body)),
+            )
+            body.append("valu", ("+", modulo, modulo, self.scratch_const_vector(1, body)))
+
+            # Update the indices
+            cur_levels[i] += 1
+            if cur_levels[i] <= forest_height:
+                body.append("valu", ("multiply_add", indices_v, indices_v, self.scratch_const_vector(2, body), modulo))
+            else:
+                body.append("valu", ("^", indices_v, indices_v, indices_v))
+                cur_levels[i] = 0
+
+            # body.append("debug", ("print", f"after indices batch {i}"))
+            # body.append("debug", ("print_scratch_v", "values_v", values_v))
+            # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
+            # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
+
+            # Write batch back to memory
+            if round == rounds - 1:
+                body.append("store", ("vstore", addr_indices, indices_v))
+                body.append("store", ("vstore", addr_values, values_v))
+
+        def schedule_loop_scalar(round: int, i: int, use_vselect: bool = False):
+            addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
+            addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
+
+            # Load indices
+            indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
+
+            if round == 0:  # prologue
+                body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
+                body.append("load", ("vload", indices_v, addr_indices))
+                for vi in range(VLEN):
+                    body.append("hint", ("join_dst", indices_v + vi, indices_v))
+
+            # Load values
+            body.append(
+                "alu",
+                (
+                    "+",
+                    addr_values,
+                    self.scratch["inp_values_p"],
+                    self.scratch_const(i * 8, body),
+                ),
+            )
+            values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
+
+            if round == 0:  # prologue
+                body.append("load", ("vload", values_v, addr_values))
+                for vi in range(VLEN):
+                    body.append("hint", ("join_dst", values_v + vi, values_v))
+
+            # calculates loads
+            forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
+            for vi in range(VLEN):
+                body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
+            forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
+
+            # Load data from nodes
+            forest_v = load_tree(round, i, use_vselect, forest_addr_v)
+
+            modulo = forest_addr_v
+            for vi in range(VLEN):
+                body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
+                self.build_hash_scalar(body, values_v + vi, forest_v + vi)
+
+                body.append(
+                    "alu",
+                    ("%", modulo + vi, values_v + vi, self.scratch_const(2, body)),
+                )
+                body.append("alu", ("+", modulo + vi, modulo + vi, self.scratch_const(1, body)))
+
+            cur_levels[i] += 1
+
+            if cur_levels[i] <= forest_height:
+                for vi in range(VLEN):
+                    body.append("alu", ("*", indices_v + vi, indices_v + vi, self.scratch_const(2, body)))
+                    body.append("alu", ("+", indices_v + vi, indices_v + vi, modulo + vi))
+            else:
+                for vi in range(VLEN):
+                    body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
+                cur_levels[i] = 0
+
+            hints_indices_v = ["join_dst", indices_v]
+            hints_values_v = ["join_dst", values_v]
+            for vi in range(VLEN):
+                hints_indices_v.append(indices_v + vi)
+                hints_values_v.append(values_v + vi)
+            body.append("hint", tuple(hints_indices_v))
+            body.append("hint", tuple(hints_values_v))
+
+            # Write batch back to memory
+            if round == rounds - 1:
+                body.append("store", ("vstore", addr_indices, indices_v))
+                body.append("store", ("vstore", addr_values, values_v))
+
         for round in range(rounds):
             body.append("debug", ("print", f"=============ROUND {round}=============="))
             for i in range(batch_size // VLEN):
 
-                def load_tree(use_vselect: bool, forest_v, forest_addr_v):
-                    if use_vselect:
-                        if round % (forest_height + 1) == 0:
-                            addr = self.scratch["forest_values_p"]
-                            body.append("load", ("vload", forest_v, addr))
-                        else:
-                            raise NotImplementedError("Error")
-                    else:
-                        # Load data from nodes
-                        for load_i in range(VLEN):
-                            body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
-                            body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
-
-                        join_dst = ["join_dst", forest_v]
-                        for load_i in range(VLEN):
-                            join_dst.append(forest_v + load_i)
-                        body.append("hint", tuple(join_dst))
-
-                def schedule_loop_vector(use_vselect: bool = False):
-                    addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
-                    addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
-
-                    # Load indices
-                    indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
-
-                    if round == 0:  # prologue
-                        body.append(
-                            "alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body))
-                        )
-                        body.append("load", ("vload", indices_v, addr_indices))
-
-                    # Load values
-                    body.append(
-                        "alu",
-                        (
-                            "+",
-                            addr_values,
-                            self.scratch["inp_values_p"],
-                            self.scratch_const(i * 8, body),
-                        ),
-                    )
-                    values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
-
-                    if round == 0:  # prologue
-                        body.append("load", ("vload", values_v, addr_values))
-
-                    # calculates loads
-                    forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
-                    body.append("valu", ("+", forest_addr_v, forest_values_p_v, indices_v))
-                    forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
-
-                    load_tree(use_vselect, forest_v, forest_addr_v)
-
-                    # forest_v --> the bintree values
-                    # values_v --> the values in our array
-                    # indices_v --> the indices in our array
-                    # body.append("debug", ("print", f"before work batch {i}"))
-                    # body.append("debug", ("print_scratch_v", "values_v", values_v))
-                    # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
-                    # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
-
-                    body.append("valu", ("^", values_v, values_v, forest_v))
-
-                    # body.append("debug", ("print", f"before hash batch {i}"))
-                    # body.append("debug", ("print_scratch_v", "values_v", values_v))
-                    # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
-                    # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
-
-                    # At end, values_v has the correct values
-                    self.build_hash_vectorized(body, values_v, forest_v)
-
-                    # body.append("debug", ("print", f"after hash batch {i}"))
-                    # body.append("debug", ("print_scratch_v", "values_v", values_v))
-                    # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
-                    # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
-
-                    modulo = forest_addr_v
-                    body.append(
-                        "valu",
-                        ("%", modulo, values_v, self.scratch_const_vector(2, body)),
-                    )
-                    body.append("valu", ("+", modulo, modulo, self.scratch_const_vector(1, body)))
-
-                    # Update the indices
-                    cur_levels[i] += 1
-                    if cur_levels[i] <= forest_height:
-                        body.append(
-                            "valu", ("multiply_add", indices_v, indices_v, self.scratch_const_vector(2, body), modulo)
-                        )
-                    else:
-                        body.append("valu", ("^", indices_v, indices_v, indices_v))
-                        cur_levels[i] = 0
-
-                    # body.append("debug", ("print", f"after indices batch {i}"))
-                    # body.append("debug", ("print_scratch_v", "values_v", values_v))
-                    # body.append("debug", ("print_scratch_v", "forest_v", forest_v))
-                    # body.append("debug", ("print_scratch_v", "indices_v", indices_v))
-
-                    # Write batch back to memory
-                    if round == rounds - 1:
-                        body.append("store", ("vstore", addr_indices, indices_v))
-                        body.append("store", ("vstore", addr_values, values_v))
-
-                def schedule_loop_scalar(use_vselect: bool = False):
-                    addr_indices = self.alloc_scratch(f"addr_indices_batch_{i}")
-                    addr_values = self.alloc_scratch(f"addr_values_batch_{i}")
-
-                    # Load indices
-                    indices_v = self.alloc_scratch(f"indices_batch_{i}_v", VLEN)
-
-                    if round == 0:  # prologue
-                        body.append(
-                            "alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body))
-                        )
-                        body.append("load", ("vload", indices_v, addr_indices))
-                        for vi in range(VLEN):
-                            body.append("hint", ("join_dst", indices_v + vi, indices_v))
-
-                    # Load values
-                    body.append(
-                        "alu",
-                        (
-                            "+",
-                            addr_values,
-                            self.scratch["inp_values_p"],
-                            self.scratch_const(i * 8, body),
-                        ),
-                    )
-                    values_v = self.alloc_scratch(f"values_batch_{i}_v", VLEN)
-
-                    if round == 0:  # prologue
-                        body.append("load", ("vload", values_v, addr_values))
-                        for vi in range(VLEN):
-                            body.append("hint", ("join_dst", values_v + vi, values_v))
-
-                    # calculates loads
-                    forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
-                    for vi in range(VLEN):
-                        body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
-                    forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
-
-                    # Load data from nodes
-                    load_tree(use_vselect, forest_v, forest_addr_v)
-
-                    modulo = forest_addr_v
-                    for vi in range(VLEN):
-                        body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
-                        self.build_hash_scalar(body, values_v + vi, forest_v + vi)
-
-                        body.append(
-                            "alu",
-                            ("%", modulo + vi, values_v + vi, self.scratch_const(2, body)),
-                        )
-                        body.append("alu", ("+", modulo + vi, modulo + vi, self.scratch_const(1, body)))
-
-                    cur_levels[i] += 1
-
-                    if cur_levels[i] <= forest_height:
-                        for vi in range(VLEN):
-                            body.append("alu", ("*", indices_v + vi, indices_v + vi, self.scratch_const(2, body)))
-                            body.append("alu", ("+", indices_v + vi, indices_v + vi, modulo + vi))
-                    else:
-                        for vi in range(VLEN):
-                            body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
-                        cur_levels[i] = 0
-
-                    hints_indices_v = ["join_dst", indices_v]
-                    hints_values_v = ["join_dst", values_v]
-                    for vi in range(VLEN):
-                        hints_indices_v.append(indices_v + vi)
-                        hints_values_v.append(values_v + vi)
-                    body.append("hint", tuple(hints_indices_v))
-                    body.append("hint", tuple(hints_values_v))
-
-                    # Write batch back to memory
-                    if round == rounds - 1:
-                        body.append("store", ("vstore", addr_indices, indices_v))
-                        body.append("store", ("vstore", addr_values, values_v))
-
-                # breakpoint()
+                use_vselect = round % (forest_height + 1) == 0 and USE_VSELECT_ALGO
                 if i in SCALAR_SCHEDULE:
-                    schedule_loop_scalar()
+                    schedule_loop_scalar(round, i, use_vselect)
                 else:
-                    schedule_loop_vector()
+                    schedule_loop_vector(round, i, use_vselect)
 
         body_instrs = self.build(body.get())
         print("TOTAL SCRATCH SPACE:", self.scratch_ptr)
@@ -474,10 +474,8 @@ class Tests(unittest.TestCase):
 
     def test_kernel_trace(self):
         # Full-scale example for performance testing
-        if USE_SIMPLE_WORKLOAD:
-            do_kernel_test(0, 1, 8, trace=True, prints=False)
-        else:
-            do_kernel_test(10, 16, 256, trace=True, prints=False)
+        do_kernel_test(*WORKLOAD, trace=True, prints=False)
+        # do_kernel_test(10, 16, 256, trace=True, prints=False)
 
     # Passing this test is not required for submission, see submission_tests.py for the actual correctness test
     # You can uncomment this if you think it might help you debug
