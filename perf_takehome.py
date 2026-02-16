@@ -37,7 +37,7 @@ from problem import (
 )
 
 from scheduler import Scheduler
-from config import USE_SCALAR, USE_SCHEDULER, USE_OPTIMIZED_VHASH, USE_SIMPLE_WORKLOAD
+from config import USE_SCALAR, USE_SCHEDULER, USE_OPTIMIZED_HASH, USE_SIMPLE_WORKLOAD
 
 
 class KernelBuilder:
@@ -122,7 +122,7 @@ class KernelBuilder:
     def build_hash_vectorized(self, body: "Appender", values_v, extra_slot):
         for i, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
             # body.append("debug", (f"print_scratch_v", f"before {i}", values_v))
-            if op3 == "<<" and op1 == "+" and op2 == "+" and USE_OPTIMIZED_VHASH:
+            if op3 == "<<" and op1 == "+" and op2 == "+" and USE_OPTIMIZED_HASH:
                 body.append(
                     "valu",
                     (
@@ -142,9 +142,13 @@ class KernelBuilder:
     def build_hash_scalar(self, body: "Appender", values, extra_slot):
         for i, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
             # body.append("debug", (f"print_scratch_v", f"before {i}", values_v))
-            body.append("alu", (op3, extra_slot, values, self.scratch_const(val3, body)))
-            body.append("alu", (op1, values, values, self.scratch_const(val1, body)))
-            body.append("alu", (op2, values, values, extra_slot))
+            if op3 == "<<" and op1 == "+" and op2 == "+" and USE_OPTIMIZED_HASH:
+                body.append("alu", ("*", values, values, self.scratch_const(2**val3 + 1, body)))
+                body.append("alu", ("+", values, values, self.scratch_const(val1, body)))
+            else:
+                body.append("alu", (op3, extra_slot, values, self.scratch_const(val3, body)))
+                body.append("alu", (op1, values, values, self.scratch_const(val1, body)))
+                body.append("alu", (op2, values, values, extra_slot))
             # body.append("debug", (f"print_scratch_v", f"after {i}", values_v))
 
     def build_kernel(self, forest_height: int, n_nodes: int, batch_size: int, rounds: int):
@@ -371,7 +375,7 @@ class KernelBuilder:
                         body.append("store", ("vstore", addr_values, values_v))
 
                 # breakpoint()
-                if i in [0, 4, 8, 12, 16, 20, 24, 28, 31] and USE_SCALAR:
+                if i in [0, 4, 7, 11, 15, 20, 24, 28, 31] and USE_SCALAR:
                     schedule_loop_scalar()
                 else:
                     schedule_loop_vector()
