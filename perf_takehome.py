@@ -62,6 +62,8 @@ class KernelBuilder:
                 return scheduler.schedule_greedy()
             case "critical":
                 return scheduler.schedule_critical_path()
+            case "by_index":
+                return scheduler.schedule_by_index()
             case "none":
                 instrs = []
                 for engine, slot in slots:
@@ -117,8 +119,8 @@ class KernelBuilder:
         scratch = self.alloc_scratch(f"const_vec_from_load_addr_{addr}", length=VLEN)
         body.add("load", ("load", scratch, addr))
         body.add("valu", ("vbroadcast", scratch, scratch))
-        for vi in range(VLEN):
-            body.add("hint", ("join_dst", scratch + vi, scratch))
+        # for vi in range(VLEN):
+        #     body.add("hint", ("join_dst", scratch + vi, scratch))
 
         self.const_map_addr[addr] = scratch
         return scratch
@@ -221,18 +223,6 @@ class KernelBuilder:
         cur_levels = [0] * (batch_size // VLEN)
         forest_values_p_v = self.scratch_const_vector_from_scalar(self.scratch["forest_values_p"], body)
 
-        def add_vwrite_hint(aligned_addr):
-            # Use before scalar writes on aligned addr
-            for vi in range(VLEN):
-                body.append("hint", ("join_dst", aligned_addr + vi, aligned_addr))
-
-        def add_vread_hint(aligned_addr):
-            # use before vector reads on aligned addr
-            res = ["join_dst", aligned_addr]
-            for vi in range(VLEN):
-                res.append(aligned_addr + vi)
-            body.append("hint", tuple(res))
-
         def load_tree(round: int, i: int, use_vselect: bool, forest_addr_v):
             forest_v = self.alloc_scratch(f"forest_batch_{i}_v", VLEN)
             if use_vselect:
@@ -243,15 +233,14 @@ class KernelBuilder:
                 else:
                     raise NotImplementedError("Error")
             else:
-                # Load data from nodes
+                # Load data from nodes - SCALAR PATH
+                # The original hints here were incorrect as there was no vector op on forest_addr_v
                 for load_i in range(VLEN):
-                    body.append("hint", ("join_dst", forest_addr_v + load_i, forest_addr_v))
+                    # The dependency of this load on the calculation of the address
+                    # (in forest_addr_v + load_i) is handled automatically by the scheduler.
                     body.append("load", ("load", forest_v + load_i, forest_addr_v + load_i))
-
-                join_dst = ["join_dst", forest_v]
-                for load_i in range(VLEN):
-                    join_dst.append(forest_v + load_i)
-                body.append("hint", tuple(join_dst))
+                # The original vread_hint here is not needed because subsequent operations
+                # on forest_v are scalar.
             return forest_v
 
         def schedule_loop_vector(round: int, i: int, use_vselect: bool = False):
@@ -344,7 +333,6 @@ class KernelBuilder:
             if round == 0:  # prologue
                 body.append("alu", ("+", addr_indices, self.scratch["inp_indices_p"], self.scratch_const(i * 8, body)))
                 body.append("load", ("vload", indices_v, addr_indices))
-            add_vwrite_hint(indices_v)
 
             # Load values]
             inp_value_p = self.scratch["inp_values_p"]
@@ -353,20 +341,18 @@ class KernelBuilder:
 
             if round == 0:  # prologue
                 body.append("load", ("vload", values_v, addr_values))
-            add_vwrite_hint(values_v)
-            add_vread_hint(values_v)
 
-            # calculates loads
+            # calculates addresses for loads
             forest_addr_v = self.alloc_scratch(f"addr_forest_batch_{i}_v", VLEN)
             for vi in range(VLEN):
+                # Scalar writes to forest_addr_v. Depends on scalar reads from indices_v.
                 body.append("alu", ("+", forest_addr_v + vi, forest_values_p_v + vi, indices_v + vi))
-            add_vread_hint(forest_addr_v)
-            add_vwrite_hint(forest_addr_v)
+            # NO HINTS NEEDED. Subsequent operations are scalar loads from these addresses.
+            # Auto-dependency tracking is sufficient.
 
             # Load data from nodes
             forest_v = load_tree(round, i, use_vselect, forest_addr_v)
-            add_vwrite_hint(forest_v)
-            add_vread_hint(forest_v)
+            # The result forest_v contains scalar values. No hints needed as subsequent ops are scalar.
 
             # forest_v --> the bintree values
             # values_v --> the values in our array
@@ -376,21 +362,18 @@ class KernelBuilder:
             body.append("debug", ("print_scratch_v", "forest_v", forest_v))
             body.append("debug", ("print_scratch_v", "indices_v", indices_v))
 
+            # Main work loop: scalar operations on values_v
             for vi in range(VLEN):
                 body.append("alu", ("^", values_v + vi, values_v + vi, forest_v + vi))
                 self.build_hash_scalar(body, values_v + vi, forest_v + vi)
-            add_vwrite_hint(values_v)
-            add_vread_hint(values_v)
 
             cur_levels[i] += 1
 
-            modulo = forest_addr_v
+            modulo = forest_addr_v  # Re-using scratch space
             if cur_levels[i] <= forest_height:
+                # Scalar operations on indices_v
                 for vi in range(VLEN):
-                    body.append(
-                        "alu",
-                        ("%", modulo + vi, values_v + vi, self.scratch_const(2, body)),
-                    )
+                    body.append("alu", ("%", modulo + vi, values_v + vi, self.scratch_const(2, body)))
                     body.append("alu", ("+", modulo + vi, modulo + vi, self.scratch_const(1, body)))
                     body.append("alu", ("*", indices_v + vi, indices_v + vi, self.scratch_const(2, body)))
                     body.append("alu", ("+", indices_v + vi, indices_v + vi, modulo + vi))
@@ -399,13 +382,10 @@ class KernelBuilder:
                     body.append("alu", ("^", indices_v + vi, indices_v + vi, indices_v + vi))
                 cur_levels[i] = 0
 
-            add_vread_hint(indices_v)
-            add_vwrite_hint(indices_v)
-            add_vread_hint(values_v)
-            add_vwrite_hint(values_v)
-
             # Write batch back to memory
             if round == rounds - 1:
+                # These vstore operations are vector reads from indices_v and values_v.
+                # The vread_hints placed above will ensure they wait for the scalar calculations.
                 body.append("store", ("vstore", addr_indices, indices_v))
                 body.append("store", ("vstore", addr_values, values_v))
 

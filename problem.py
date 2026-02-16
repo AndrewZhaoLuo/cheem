@@ -46,7 +46,7 @@ def cdiv(a, b):
     return (a + b - 1) // b
 
 
-SLOT_LIMITS = {"alu": 12, "valu": 6, "load": 2, "store": 2, "flow": 1, "debug": 64, "hint": 64}
+SLOT_LIMITS = {"alu": 12, "valu": 6, "load": 2, "store": 2, "flow": 1, "debug": 64}
 
 VLEN = 8
 # Older versions of the take-home used multiple cores, but this version only uses 1
@@ -156,8 +156,6 @@ class Machine:
                 f'{{"name": "process_name", "ph": "M", "pid": {ci}, "tid": 0, "args": {{"name":"Core {ci}"}}}},\n'
             )
             for name, limit in SLOT_LIMITS.items():
-                if name == "hint":
-                    continue
                 for i in range(limit):
                     tid_counter += 1
                     self.trace.write(
@@ -168,8 +166,6 @@ class Machine:
         # Add zero-length events at the start so all slots show up in Perfetto
         for ci, core in enumerate(self.cores):
             for name, limit in SLOT_LIMITS.items():
-                if name == "hint":
-                    continue
                 for i in range(limit):
                     tid = self.tids[(ci, name, i)]
                     self.trace.write(
@@ -311,9 +307,6 @@ class Machine:
         elif slot[0] == "print":
             print(*slot[1:])
 
-    def hint(self, core, *slot):
-        pass
-
     def flow(self, core, *slot):
         match slot:
             case ("select", dest, cond, a, b):
@@ -373,13 +366,10 @@ class Machine:
             "store": self.store,
             "flow": self.flow,
             "debug": self.debug,
-            "hint": self.hint,
         }
         self.scratch_write = {}
         self.mem_write = {}
         for name, slots in instr.items():
-            if name == "hint":
-                continue
             assert len(slots) <= SLOT_LIMITS[name]
             for i, slot in enumerate(slots):
                 if self.trace is not None:

@@ -3,8 +3,9 @@ SCALAR_SCHEDULE = [0, 4, 7, 11, 15, 20, 24, 28, 31]
 
 # "critical": uses critical path heuristic
 # "greedy": simple greedy scheduler
+# "by_index": uses instruction index as priority (old buggy behavior)
 # "none": don't do vliw bundle creation
-SCHEDULER = "critical"
+SCHEDULER = "by_index"
 SCHEDULER_DEBUG = False
 
 # Use optimized hashes for certain steps
