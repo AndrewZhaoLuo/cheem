@@ -15,4 +15,4 @@ USE_OPTIMIZED_HASH = True
 WORKLOAD = (10, 16, 256)
 
 # Whether to enable vselect algorithm for loading
-USE_VSELECT_ALGO = False
+USE_VSELECT_ALGO = True

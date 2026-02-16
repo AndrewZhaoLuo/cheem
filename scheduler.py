@@ -162,7 +162,6 @@ class Scheduler:
         answer = []
         while num_scheduled_slots < len(self.slots):
             bundle = schedule_greedy()
-            # print(bundle)
             answer.append(bundle)
         return answer
 
